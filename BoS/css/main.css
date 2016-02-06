@@ -1,0 +1,45 @@
+#bodyWrapper {
+    position:relative;
+    margin-left:auto;
+    margin-right:auto;
+    top: 20px;
+    width:75%;
+    background-color: #CCCCCC;
+}
+#topNavigation{
+    position: relative;
+    left: 75%;
+}
+#helpNav{
+    position: relative;
+    left: 75%;
+	top: 10%;
+}
+#search{
+	position: relative;
+    left: 90%;
+	top: 0%;
+}
+#headerContainer{
+	height:225px;
+	background-color: #FFFFFF;
+}
+
+#bigContent{
+	height:300px;
+	background-color: #F7F6F4;
+}
+
+#separator{
+	height:10px;
+	background-color: #CFC6BF;
+}
+#littleContent{
+	height:225px;
+	background-color: #F7F2EF;
+}
+#Informationals{
+	height:225px;
+	background-color: #FFFFFF;
+}
+Informationals
