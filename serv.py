@@ -5,7 +5,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError # For sql error catching
 import hashlib
 import sys # for testing
-
+import smtplib # for email
 
 
 
@@ -20,11 +20,14 @@ class Users(db.Model):
     username = db.Column(db.String(80), unique=True)
     password = db.Column(db.String(512))
     team = db.Column(db.Integer)
-    #email = db.Column(db.String(120), unique=True)
+    secondFactor = db.Column(db.String(255))
+    challenge = db.Column(db.String(10))
 
-    def __init__(self, username, email):
+    def __init__(self, username, password, team, challenge):
         self.username = username
         self.password = password
+        self.team = team
+        self.challenge = challenge
 
     def __repr__(self):
     	return '<User %r>' % (self.username)
@@ -65,7 +68,6 @@ def writeLogMessage(number,message,data):
 	outputLoc = outputLoc.split('|')
 	if('stdout' in outputLoc):
 		print message_string
-	print 'file' in outputLoc
 	if('file' in outputLoc):
 		# We could also supoprt a JSON handler here to say ES
 		try:
@@ -98,17 +100,50 @@ def secondFactor():
 			if param in request.form.keys():
 				continue
 			else:
-				writeLogMessage(1,"The required arguments were not provided", str(request.form.keys()))
-				return json.dumps("Error 01: We were unable to process your request")
+				writeLogMessage(401,"The required arguments were not provided", str(request.form.keys()))
+				return json.dumps("Error 401: We were unable to process your request")
 		if(len(request.form["username"]) != 0):
 			username = request.form["username"]
 			result = Users.query.filter(Users.username == username).first()
-			print result.username
+			if result!=None:
+				print result.secondFactor
+				#Generate random challenge
+				# Use the os.urandom() function to create a CSPRNG
+				try:
+					rng = random.SystemRandom()
+				except NotImplementedError:
+					writeLogMessage(403,"The random number generator was not available","")
+					return json.dumps("Error 403: We were unable to process your request")
+				secret = ""
+				# We have 93 possible options and 128 slots (or 93^10 combinations)
+				for i in range(0,10):
+					secret += chr(rng.randint(33, 126))
+				# If we got a valid user then attach the secret and email them
+				result.challenge=secret
+				print secret
+				try:
+					db.session.commit()
+				except IntegrityError as e:
+					writeLogMessage(404,"There was an issue inserting our value, perhaps a non-unique sessionID",e)
+					return json.dumps("Error 404: We were unable to process your request")
+				# Generate the email
+				#sender = 'from@fromdomain.com'
+				#receivers = ['to@todomain.com']
+				#message = "Subject: SMTP e-mail test\nThis is a test e-mail message."
+				#try:
+				#   smtpObj = smtplib.SMTP('localhost')
+				#   smtpObj.sendmail(sender, receivers, message)         
+				#   print "Successfully sent email"
+				#except SMTPException:
+				#   print "Error: unable to send email"
+			else:
+				writeLogMessage(405,"No result was returned for that username",username)
+				return json.dumps("Error 405: We were unable to process your request")
 		else:
-			writeLogMessage(2,"There was an issue getting the username value", "")
-			return json.dumps("Error 02: We were unable to process your request")
+			writeLogMessage(402,"There was an issue getting the username value", "")
+			return json.dumps("Error 402: We were unable to process your request")
 	return json.dumps("test")
-# Takes a username and password, if white team additional
+# Takes a username and password, if white team additional challenge
 @app.route("/getSession",methods=['GET','POST'])
 def session():
 	validRequest = False
@@ -143,6 +178,29 @@ def session():
 		else:
 			writeLogMessage(5,"Either the username or password was blank","")
 			return json.dumps("Error 05: We were unable to process your request")
+		# Check if we need an additional authentication because they're white team
+		#  White team is team 1
+		if result.team == 1:
+			if 'challenge' in request.form.keys():
+				if(result.challenge == None):
+					writeLogMessage(13,"User forgot to reaquire 2nd factor after using it",result.username)
+					return json.dumps("Error 13: We were unable to process your request")
+				if(request.form["challenge"] == result.challenge):
+					# Reset challenge
+					result.challenge=None
+					try:
+						db.session.commit()
+					except IntegrityError as e:
+						writeLogMessage(12,"There was an issue inserting our value, perhaps a non-unique sessionID",e)
+						return json.dumps("Error 12: We were unable to process your request")
+					print "we maid it"
+				else:
+					writeLogMessage(10,"The challenge provided was incorrect","")
+					return json.dumps("Error 10: We were unable to process your request")
+			else:
+				writeLogMessage(11,"The user is a white teamer but didn't provide a challenge","")
+				return json.dumps("Error 11: We were unable to process your request")
+
 	else:
 		writeLogMessage(3,"We received an invalid method",request.method)
 		return json.dumps("Error 03: We were unable to process your request")
@@ -203,7 +261,6 @@ def giveMoney():
 		if(len(request.form["session"]) != 0):
 			valid = checkSession(request.form["session"],time.time(),remote_ip)
 			if(valid != None):
-				print valid.session
 				session = valid.session
 			else:
 				print "The session identifier provided expired or was invalid"
