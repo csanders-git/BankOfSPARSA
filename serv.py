@@ -3,6 +3,7 @@ import random, math, json
 import time
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError # For sql error catching
+from flask_recaptcha import ReCaptcha
 import hashlib
 import sys # for testing
 import smtplib # for email
@@ -11,6 +12,7 @@ import smtplib # for email
 
 app = Flask(__name__)
 app.config.from_pyfile('hello.cfg')
+recaptcha = ReCaptcha(app=app)
 db = SQLAlchemy(app)
 db.create_all()
 
@@ -83,15 +85,27 @@ def writeLogMessage(number,message,data):
 
 @app.route("/")
 def hello():
-	users = Users.query.all()
-	
-	return "hello" + str(users)
-    #return render_template('index.html')
+    return render_template('index.html')
+
+@app.route("/humanTest",methods=['GET','POST'])
+def human():
+	print request.form.keys()
+	if('username' in request.form.keys()):
+		userCheck= request.form["username"]
+	elif('username' in request.args.keys()):
+		userCheck= request.args["username"]
+	else:
+		userCheck = ""
+	return render_template('captcha.html',username=userCheck)
 
 # Takes a username if it is a white team it will
 # provide trigger the second factor gen
 @app.route("/getSecondFactor",methods=['GET','POST'])
 def secondFactor():
+	if not recaptcha.verify():
+		print request.form.keys()
+		writeLogMessage(406,"The user did not pass the reCaptcha challenge","")
+		return json.dumps("Error 406: We were unable to process your request")
 	validRequest = False
 	# Get the username and password
 	if request.method == 'POST':
