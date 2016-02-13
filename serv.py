@@ -15,6 +15,8 @@ app.config.from_pyfile('hello.cfg')
 recaptcha = ReCaptcha(app=app)
 db = SQLAlchemy(app)
 db.create_all()
+WHITETEAM = 0
+ATM = -1
 
 
 class Users(db.Model):
@@ -69,8 +71,22 @@ def checkSession(uid,sessionId,time2,remoteIP):
             db.session.commit()
         except IntegrityError:
 		return None
-        result = Session.query.filter(Session.uid == uid, Session.session == sessionId, Session.ip == remoteIP).first()
-	return result
+        # Check what team the uid associated with the session is on
+        res1 = Session.query.filter(Session.session == sessionId, Session.ip == remoteIP).first()
+        if(res1 == None):
+            return None
+        res2 = Users.query.filter(Users.uid==res1.uid).first()
+        team = res2.team
+        # Whiteteam may need a session even though they are modifying non-whiteteam uid's (don't check UIDs)
+        if(team==WHITETEAM):
+            result = Session.query.filter(Session.session == sessionId, Session.ip == remoteIP).first()
+        else:
+            result = Session.query.filter(Session.uid == uid, Session.session == sessionId, Session.ip == remoteIP).first()
+        # Check if our query returned nothing
+        if result == None:
+            return None
+	else:
+            return (result,team)
 
 
 def writeLogMessage(number,message,data):
@@ -94,6 +110,7 @@ def writeLogMessage(number,message,data):
 			myfile.close()
         return json.dumps("Error " + str(number) + ": We are unable to process your request")
 
+# It doesn't seem like hashlib throws any exceptions
 def hashPass(password,accountNum):
     # hash our password with two salts
     m = hashlib.sha512()
@@ -131,7 +148,7 @@ def retBalance():
             continue
         else:
             return writeLogMessage(501,"The required arguments were not provided", str(request.form.keys()))
-    accountNum = request.form["accountNum"]
+    accountNum = str(request.form["accountNum"])
     result = Users.query.filter(Users.accountNum == accountNum).first()
     if(result==None):
         return writeLogMessage(505,"An invalid accountNum was provided",accountNum)
@@ -147,7 +164,6 @@ def retBalance():
             return writeLogMessage(503,"The session param provided was empty","")
     if valid == True:
         resAccount = Accounts.query.filter(Accounts.uid == result.uid).first()
-        print resAccount.balance
         data = { 'Balance': resAccount.balance }
         encoded_data = json.dumps(data)
         return encoded_data
@@ -217,52 +233,59 @@ def secondFactor():
 # Takes a accountNum, session, old password, and new password
 @app.route("/changePassword",methods=['POST'])
 def changePass():
-    # Get the accountNum and password
     remote_ip = request.remote_addr
-    required = ["accountNum","password","session","newPassword"]
-    # Check if we got our required param
+    required = ["accountNum","session","newPassword"]
+    # Check if we got our required param (for nonwhite-we also need passwordOld)
     for param in required:
         if param in request.form.keys():
             continue
         else:
             return writeLogMessage(600,"The required arguments were not provided", str(request.form.keys()))
-    accountNum = request.form["accountNum"]
-    password = request.form["password"]
-    password = hashPass(password,accountNum)
-    #TODO: If Whiteteam skip password check
-    # Veryify old password is correct with username and get uid
-    valid = False
-    result = Users.query.filter(Users.accountNum == accountNum, Users.password == password).first()
-    if(result==None):
-        return writeLogMessage(601,"An invalid or incorrect username or old password was provided","")
+    accountNum = str(request.form["accountNum"])
+    # Generate our new password hash
+    newPass = hashPass(str(request.form["newPassword"]),accountNum)
+    # Get tentative uid for account number
+    res1 = Users.query.filter(Users.accountNum == accountNum).first() 
+    if res1 == None:
+        return WriteLogMessage(607,"An invalid account number was supplied","")
+    # Check if we have a valid session
     if(len(request.form["session"]) != 0):
-        valid = checkSession(result.uid,request.form["session"],time.time(),remote_ip)
-        if(valid != None):
-            valid = True
-        else:
+        # if it's white team UID is not a factor, it just must be a valid session/IP combo
+        valid = checkSession(res1.uid,str(request.form["session"]),time.time(),remote_ip)
+        if valid == None:
             return writeLogMessage(602,"The session identifier provided expired or was invalid", request.form["session"])
     else:
-            return writeLogMessage(603,"The session param provided was empty","")
-    # Generate our new password hash
-    newPass = hashPass(request.form["newPassword"],accountNum)
-    # Check that the old password does not match the new password
-    if(password == newPass):
-        return writeLogMessage(604,"The new password is the same as the old password or a collision occured",[newPass,password]) 
-    #TODO: Password complexity
-    # They have a valid session, keep going
-    if valid == True:
-        # Update new password
-        result.password = newPass
-        #TODO Catch exception
-        db.session.commit()
-        # Return success status
-        data = [ { 'Status': "Completed" } ]
-        encoded_data = json.dumps(data)
-        return encoded_data
+        return writeLogMessage(603,"The session param provided was empty","")
+    # If white team skip old password req
+    if(valid[1] != WHITETEAM):
+        if 'password' not in request.form.keys():
+            return WriteLogMessage(606,"The request was non-white team and featured no old password","")
+        # we'll use this more general for as our result
+        password = str(request.form["password"])
+        password = hashPass(password,accountNum)
+        # Verify old password is correct with accountNum and get uid
+        result = Users.query.filter(Users.accountNum == accountNum, Users.password == password).first()
+        if(result==None):
+            return writeLogMessage(601,"An invalid or incorrect username or old password was provided","")
+        # Check that the old password does not match the new password
+        if(password == newPass):
+            return writeLogMessage(604,"The new password is the same as the old password or a collision occured",[newPass,password])
+        #TODO: Password complexity
     else:
-        return writeLogMessage(604,"We should never have gotten here, there was an invalid request","")
-
-
+        result = Users.query.filter(Users.accountNum == accountNum).first()
+        if result == None:
+            return writeLogMessage(608,"An invalid username was required, but we should have never gotten here","")
+    # They have a valid session, keep going
+    # Update new password
+    result.password = newPass
+    try:
+        db.session.commit()
+    except IntegrityError as e:
+        return writeLogMessage(605, "We had an issue updating our password, with the DB",str(e))
+    # Return success status
+    data = [ { 'Status': "Completed" } ]
+    encoded_data = json.dumps(data)
+    return encoded_data
 
 
 # Takes a accountNum and password, if white team additional challenge
@@ -280,11 +303,11 @@ def session():
             return writeLogMessage(4,"The required arguments were not provided", str(request.form.keys()))
     # Make sure our parameters aren't empty
     if(len(request.form["accountNum"]) != 0  and len(request.form["password"]) != 0):
-        accountNum = request.form["accountNum"]
-        password = request.form["password"]
+        accountNum = str(request.form["accountNum"])
+        password = str(request.form["password"])
         # hash our password with two salts
         password = hashPass(password,accountNum)        
-        print password
+        print password # This is usful for setup
         # Test if our user and password are valid
         result = Users.query.filter(Users.accountNum == accountNum, Users.password == password).first()
         if(result != None and result.accountNum == accountNum):
@@ -295,109 +318,103 @@ def session():
          return writeLogMessage(5,"Either the accountNum or password was blank","")
     # Check if we need an additional authentication because they're white team
     #  White team is team 0
-    if result.team == 0:
+    if result.team == WHITETEAM:
         if 'challenge' in request.form.keys():
             if(result.challenge == None):
                 return writeLogMessage(13,"User forgot to reaquire 2nd factor after using it",result.accountNum)
-            if(request.form["challenge"] == result.challenge):
-                # Reset challenge
-                result.challenge=None
-                try:
-                    db.session.commit()
-                except IntegrityError as e:
-                    return writeLogMessage(12,"There was an issue inserting our value, perhaps a non-unique sessionID",e)
-                print "we maid it"
+            if(str(request.form["challenge"]) == result.challenge):
+                pass
+                #TODO reenable when done testing
+                # Reset challenge to ntohing
+                #result.challenge=None
+                #try:
+                #    db.session.commit()
+                #except IntegrityError as e:
+                #    return writeLogMessage(12,"There was an issue inserting our value, perhaps a non-unique sessionID",e)
             else:
-                writeLogMessage(10,"The challenge provided was incorrect","")
-                return json.dumps("Error 10: We were unable to process your request")
+                return writeLogMessage(10,"The challenge provided was incorrect","")
         else:
-            writeLogMessage(11,"The user is a white teamer but didn't provide a challenge","")
-            return json.dumps("Error 11: We were unable to process your request")
+            return writeLogMessage(11,"The user is a white teamer but didn't provide a challenge","")
     # If it wasn't white team or we passed white team checks then:
     if(validRequest == True):
         # Use the os.urandom() function to create a CSPRNG
         try:
             rng = random.SystemRandom()
         except NotImplementedError:
-            writeLogMessage(2,"The random number generator was not available","")
-            return json.dumps("Error 02: We were unable to process your request")
+            return writeLogMessage(2,"The random number generator was not available","")
         sessionID = ""
         # We have 93 possible options and 128 slots (or 93^128 combinations)
         for i in range(0,128):
             sessionID += chr(rng.randint(33, 126))
         # Make sure we got a string of the length we expected
         if(sessionID == "" or len(sessionID) != 128):
-            writeLogMessage(1,"The sessionID we generated was not the right length",sessionID)
-            return json.dumps("Error 01: We were unable to process your request")
+            return writeLogMessage(1,"The sessionID we generated was not the right length",sessionID)
         # Persist the SessionID with the IP Address
-        # We only allow 5 seconds for the user to use the session
+        # We only allow N seconds for the user to use the session
         u = Session(result.uid,sessionID,time.time()+app.config['SESSION_TIMEOUT'],remote_ip)
         try:
             db.session.add(u)
             db.session.commit()
         except IntegrityError as e:
-            writeLogMessage(9,"There was an issue inserting our value, perhaps a non-unique sessionID",e)
-            return json.dumps("Error 09: We were unable to process your request")
-        print "Added our Session"
+            return writeLogMessage(9,"There was an issue inserting our value, perhaps a non-unique sessionID",e)
         # Check session will remove old keys here and make sure we're valid
         valid = checkSession(result.uid,sessionID,time.time(),remote_ip)
         if(valid == None):
-            writeLogMessage(8,"The session was not added properly, check MySQL","")
-            return json.dumps("Error 08: We were unable to process your request")
+            return writeLogMessage(8,"The session was not added properly, check MySQL","")
         # Return the SessionID to the user
         data = { 'SessionID': sessionID }
         encoded_data = json.dumps(data)
         return encoded_data
     else:
-       writeLogMessage(7,"We never set the validRequest flag, uhoh","")
-       return json.dumps("Error 07: We were unable to process your request")                
+       return writeLogMessage(7,"We never set the validRequest flag, uhoh","")
     
 
+# This is for whiteteam only
 # Takes a session, an account, and an amount
 @app.route("/giveMoney",methods=['POST'])
 def giveMoney():
-	tempSession = ["1234"]
-	tempIPs = ["127.0.0.1"]
-	tempAccounts = ["1234"]
-	if request.method == 'GET':
-		remote_ip = request.remote_addr
-		required = ["session","destAccount","amount"]
-		# Check if we got our required params
-		for param in required:
-			if param in request.form.keys():
-				continue
-			else:
-				return "Error 100: We were unable to process your request"
-		# Check that we have a valid session ID
-		
-		if(len(request.form["session"]) != 0):
-			valid = checkSession(1,request.form["session"],time.time(),remote_ip)
-			if(valid != None):
-				session = valid.session
-			else:
-				print "The session identifier provided expired or was invalid"
-				return "Error 101: We are unable to process your request"
-		else:
-				return "Error 102: We are unable to process your request"
-		# Check if our amount is valid
-		try:
-			amount = float(request.form["amount"])
-		except ValueError:
-			return "Error 103: We are unable to process your request"
-		if(amount < 0 or amount > 99999):
-			return "Error 104: We are unable to process your request"
-		# Check if our account is valid
-		try:
-			destAccount = int(request.form["destAccount"])
-		except ValueError:
-			return "Error 105: We are unable to process your request"
-		if str(destAccount) not in tempAccounts:
-			return "Error 106: We are unable to process your request"
-		# Get the existing amount and add ours
-		# Return success status
-		data = [ { 'Status': "Completed" } ]
-		encoded_data = json.dumps(data)
-		return encoded_data	
+    remote_ip = request.remote_addr
+    required = ["session","destAccount","amount"]
+    # Check if we got our required params
+    for param in required:
+        if param in request.form.keys():
+	    continue
+	else:
+	    return writeLogMessage(100,"The correct parameters were not provided","")
+    accountNum = str(request.form["destAccount"])
+    # Check that we have a valid session ID
+    if(len(request.form["session"]) != 0):
+        valid = checkSession(-1,str(request.form["session"]),time.time(),remote_ip)
+        if(valid == None):
+            return writeLogMessage(101,"The session identifier provided expired or was invalid",str(request.form["session"]))
+        if(valid[1] != WHITETEAM):
+            return writeLogMessage(107,"A non white-team member tried to use a white-team only function","")
+    else:
+        return writeLogMessage(102,"The sessionID provided was blank","")
+    # Check if our amount is valid
+    try:
+	amount = float(str(request.form["amount"]))
+    except ValueError:
+        return writeLogMessage(103,"We were unable to convert the amount provided to a float",str(request.form["amount"]))
+    if(amount < 0 or amount > 99999):
+        return writeLogMessage(104,"The amount prescribed was invalid",str(amount))
+    # Check if our account is valid
+    res1 = Users.query.filter(Users.accountNum == accountNum).first()
+    if(res1 == None):
+        return writeLogMessage(105,"The account number provided could not be found",str(accountNum))
+    res2 = Accounts.query.filter(Accounts.uid == res1.uid).first()
+    if(res2 == None):
+        return writeLogMessage(106,"The user UID we got did not seem to have account",str(res1.uid))
+    res2.balance = res2.balance + amount
+    try:
+        # Get the existing amount and add ours
+        db.session.commit()
+    except IntegrityError as e:
+        return writeLogMessage(108,"We were unable to update the balance of users",str(e))
+    #if valid success status
+    data = { 'Status': "Completed" }
+    encoded_data = json.dumps(data)
+    return encoded_data	
 
 # Takes a session, an account, and an amount
 @app.route("/takeMoney",methods=['POST'])
@@ -445,65 +462,55 @@ def takeMoney():
 # Takes a session, an account, and an amount
 @app.route("/transferMoney",methods=['POST'])
 def transferMoney():
-	tempSession = ["1234"]
-	tempIPs = ["127.0.0.1"]
-	tempAccounts = ["1234","1235"]
-	if request.method == 'POST':
-		remote_ip = request.remote_addr
-		required = ["session","srcAccount","destAccount","amount"]
-		# Check if we got our required params
-		for param in required:
-			if param in request.form.keys():
-				continue
-			else:
-				print "We did not receive the expected parameters"
-				return "Error 300: We were unable to process your request"
-		# Check that we have a valid session ID
-		if(len(request.form["session"]) != 0):
-			if(request.form["session"] in tempSession) and (remote_ip in tempIPs):
-				session = request.form["session"]
-			else:
-				print "Either the sessionID was invalid or the remote_IP was invalid"
-				return "Error 301: We are unable to process your request"
-		else:
-				print "The session provided was of length 0"
-				return "Error 302: We are unable to process your request"
-		# Check if our amount is valid
-		try:
-			amount = float(request.form["amount"])
-		except ValueError:
-			print "We could not convert the amount to a float"
-			return "Error 303: We are unable to process your request"
-		if(amount < 0 or amount > 99999):
-			print "The amount provided was either too large or too small"
-			return "Error 304: We are unable to process your request"
-		# Check if our source account is valid
-		try:
-			srcAccount = int(request.form["srcAccount"])
-		except ValueError:
-			print "We could not convert srcAccount to an integer"
-			return "Error 305: We are unable to process your request"
-		if str(srcAccount) not in tempAccounts:
-			print "We could not locate the provided srcAccount"
-			return "Error 306: We are unable to process your request"
-		# Check if our dest account is valid
-		try:
-			destAccount = int(request.form["destAccount"])
-		except ValueError:
-			print "We could not convert destAccount to an integer"
-			return "Error 307: We are unable to process your request"
-		if str(destAccount) not in tempAccounts:
-			print "We could not locate the provided destAccount"
-			return "Error 308: We are unable to process your request"
-		if(srcAccount == destAccount):
-			print "The request had the same source and destination accounts"
-			return "Error 309 We are unable to process your request"
-		# Get the existing amount and add ours
-		# Return success status
-		data = [ { 'Status': "Completed" } ]
-		encoded_data = json.dumps(data)
-		return encoded_data
+    remote_ip = request.remote_addr
+    required = ["accountNum","session","destAccount","amount"]
+    # Check if we got our required params
+    for param in required:
+        if param in request.form.keys():
+            continue
+        else:
+            return  writeLogMessage(300,"We did not receive the expected parameters",str(request.form.keys()))
+    # Get Account number uid
+    accountNum = str(request.form["accountNum"])
+    destAccount = str(request.form["destAccount"])
+    res = Users.query.filter(Users.accountNum == accountNum).first()
+    if(res == None):
+        return  writeLogMessage(301,"A request to transfer from an unknown account number was supplied",accountNum)
+    if(len(request.form["session"]) != 0):
+        valid = checkSession(res.uid,str(request.form["session"]),time.time(),remote_ip)
+        if(valid == None):
+            return writeLogMessage(302,"The session identifier provided expired or was invalid",str(request.form["session"]))
+    else:
+        return writeLogMessage(303,"The sessionID provided was blank","")
+    # Check if our amount is valid
+    try:
+        amount = float(str(request.form["amount"]))
+    except ValueError:
+        return writeLogMessage(305,"We were unable to convert the amount provided to a float",str(request.form["amount"]))
+    if(amount < 0 or amount > 99999):
+        return writeLogMessage(306,"The amount prescribed was invalid",str(amount))
+ 
+    sourceAccountID = res.uid
+    dest = Users.query.filter(Users.accountNum == destAccount).first()
+    if(dest == None):
+        return writeLogMessage(304,"We were unable to find a destination account that matched the provided",destAccount)
+    destAccountID = dest.uid
+    source = Accounts.query.filter(Accounts.uid == sourceAccountID ).first()
+    dest = Accounts.query.filter(Accounts.uid == destAccountID).first()
+    if(source.balance - amount < 0):
+        return writeLogMessage(307,"The source account does not have adequite funds to make that transfer",accountNum)
+    else:
+        source.balance = source.balance - amount
+        dest.balance = dest.balance + amount
+    try:
+        db.session.commit()
+    except IntegrityError as e:
+        return writeLogMessage(308,"We were unable to transfer money due to a SQL issue",str(e))
 
+    data = [ { 'Status': "Completed" } ]
+    encoded_data = json.dumps(data)
+    return encoded_data
+ 
 
 if __name__ == "__main__":
 	app.run(host='172.30.0.251')
