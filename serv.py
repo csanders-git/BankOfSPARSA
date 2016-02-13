@@ -76,6 +76,8 @@ def checkSession(uid,sessionId,time2,remoteIP):
         if(res1 == None):
             return None
         res2 = Users.query.filter(Users.uid==res1.uid).first()
+        if(res2 == None):
+            return None
         team = res2.team
         # Whiteteam may need a session even though they are modifying non-whiteteam uid's (don't check UIDs)
         if(team==WHITETEAM):
@@ -243,6 +245,7 @@ def changePass():
             return writeLogMessage(600,"The required arguments were not provided", str(request.form.keys()))
     accountNum = str(request.form["accountNum"])
     # Generate our new password hash
+    print request.form["newPassword"]
     newPass = hashPass(str(request.form["newPassword"]),accountNum)
     # Get tentative uid for account number
     res1 = Users.query.filter(Users.accountNum == accountNum).first() 
@@ -286,6 +289,62 @@ def changePass():
     data = [ { 'Status': "Completed" } ]
     encoded_data = json.dumps(data)
     return encoded_data
+
+
+# Takes a accountNum, session, old password, and new password
+@app.route("/changePin",methods=['POST'])
+def changePin():
+    remote_ip = request.remote_addr
+    required = ["accountNum","session","newPin"]
+    # Check if we got our required param (for nonwhite-we also need passwordOld)
+    for param in required:
+        if param in request.form.keys():
+            continue
+        else:
+            return writeLogMessage(800,"The required arguments were not provided", str(request.form.keys()))
+    accountNum = str(request.form["accountNum"])
+    newPin = str(request.form["newPin"])
+    # Get tentative uid for account number
+    res1 = Users.query.filter(Users.accountNum == accountNum).first() 
+    if res1 == None:
+        return WriteLogMessage(807,"An invalid account number was supplied","")
+    # Check if we have a valid session
+    if(len(request.form["session"]) != 0):
+        # if it's white team UID is not a factor, it just must be a valid session/IP combo
+        valid = checkSession(res1.uid,str(request.form["session"]),time.time(),remote_ip)
+        if valid == None:
+            return writeLogMessage(802,"The session identifier provided expired or was invalid", request.form["session"])
+    else:
+        return writeLogMessage(803,"The session param provided was empty","")
+    # If white team skip old password req
+    if(valid[1] != WHITETEAM):
+        if 'pin' not in request.form.keys():
+            return WriteLogMessage(806,"The request was non-white team and featured no old pin","")
+        pin = str(request.form["pin"])
+        # Verify old password is correct with accountNum and get uid
+        result = Accounts.query.filter(Accounts.uid == res1.uid, Accounts.pin == pin).first()
+        if(result==None):
+            return writeLogMessage(801,"An invalid or incorrect account number or old pin was provided","")
+        # Check that the old password does not match the new password
+        if(pin == newPin):
+            return writeLogMessage(804,"The new pin is the same as the old pin",[newPin,pin])
+    else:
+        result = Accounts.query.filter(Accounts.uid == res1.uid).first()
+        if result == None:
+            return writeLogMessage(608,"An invalid username was required, but we should have never gotten here","")
+    if(len(newPin) != 4):
+        return writeLogMessage(609,"An invalid pin was provided, the pin wasn't long enough","") 
+    # Update new pin
+    result.pin = newPin
+    try:
+        db.session.commit()
+    except IntegrityError as e:
+        return writeLogMessage(605, "We had an issue updating our password, with the DB",str(e))
+    # Return success status
+    data = [ { 'Status': "Completed" } ]
+    encoded_data = json.dumps(data)
+    return encoded_data
+
 
 
 # Takes a accountNum and password, if white team additional challenge
