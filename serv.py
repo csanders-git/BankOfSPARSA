@@ -80,7 +80,7 @@ def checkSession(uid,sessionId,time2,remoteIP):
             return None
         team = res2.team
         # Whiteteam may need a session even though they are modifying non-whiteteam uid's (don't check UIDs)
-        if(team==WHITETEAM):
+        if(team==WHITETEAM or team==ATM):
             result = Session.query.filter(Session.session == sessionId, Session.ip == remoteIP).first()
         else:
             result = Session.query.filter(Session.uid == uid, Session.session == sessionId, Session.ip == remoteIP).first()
@@ -138,6 +138,45 @@ def human():
 	else:
 		userCheck = ""
 	return render_template('captcha.html',username=userCheck)
+
+#Takes a accountNum and session
+@app.route("/getPin",methods=['GET','POST'])
+def retPin():
+    remote_ip = request.remote_addr
+    required = ["accountNum","session"]
+    # Check if we got our required params
+    for param in required: 
+        if param in request.form.keys():
+            continue
+        else:
+            return writeLogMessage(900,"The required arguments were not provided", str(request.form.keys()))
+    accountNum = str(request.form["accountNum"])
+    # Get tentative uid for account number
+    res1 = Users.query.filter(Users.accountNum == accountNum).first()
+    if res1 == None:
+        return WriteLogMessage(907,"An invalid account number was supplied","")
+
+    valid = False
+    if(len(request.form["session"]) != 0):	
+        # if it's white team UID is not a factor, it just must be a valid session/IP combo
+        valid = checkSession(res1.uid,str(request.form["session"]),time.time(),remote_ip)
+	print valid
+        if valid == None:
+            return writeLogMessage(902,"The session identifier provided expired or was invalid", request.form["session"])
+    else:
+        return writeLogMessage(903,"The session param provided was empty","")
+    # If white team good to go
+    if(valid[1] != ATM):
+        return writeLogMessage(904,"Someone other than the ATM requested a pin","")
+    else:
+        valid = True
+    if valid == True:
+        resAccount = Accounts.query.filter(Accounts.uid == res1.uid).first()
+        data = { 'Pin': resAccount.pin }
+        encoded_data = json.dumps(data)
+        return encoded_data
+    else:
+        return writeLogMessage(905,"Somehow we got an invalid request, this shouldn't happen", "")
 
 #Takes a accountNum and session
 @app.route("/getBalance",methods=['GET','POST'])
