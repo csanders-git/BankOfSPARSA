@@ -334,7 +334,7 @@ def changePass():
 @app.route("/changePin",methods=['POST'])
 def changePin():
     remote_ip = request.remote_addr
-    required = ["accountNum","session","newPin"]
+    required = ["accountNum","session","pin","newPin"]
     # Check if we got our required param (for nonwhite-we also need passwordOld)
     for param in required:
         if param in request.form.keys():
@@ -611,4 +611,4 @@ def transferMoney():
  
 
 if __name__ == "__main__":
-	app.run(host='172.30.0.251')
+	app.run(host='10.0.1.10')
