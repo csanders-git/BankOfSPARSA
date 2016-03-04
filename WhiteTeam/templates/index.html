@@ -1,0 +1,85 @@
+<html>
+<head>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.0/jquery.min.js"></script>
+<script>
+$( document ).ready(function() {
+	$( "#typeSelect" ).change(function() {
+		if($( "#typeSelect" ).val() == 1){
+			var request = '<form id="typeForm" action="submitRequest" method="post"><br /> \
+					<input type="hidden" name="reqID" value="'+$( "#typeSelect" ).val()+'"><br /> \
+					Password: <input type="text" name="Password" value="test3"><br /> \
+					Challenge: <input type="text" name="Challenge" value="1234"><br /> \
+					Dest AccountNum: <input type="text" name="AccountNum"><br /> \
+					Amount: <input type="text" name="Amount" placeholder="Amount"><br /> \
+					<input type="submit"> \
+					</form>';
+			$("#result").html(request);
+		}
+		if($("#typeSelect").val() == 2){
+			var request = '<form id="typeForm" action="submitRequest" method="post"><br /> \
+					<input type="hidden" name="reqID" value="'+$( "#typeSelect" ).val()+'"><br /> \
+					Password: <input type="text" name="Password" value="test3"><br /> \
+					Challenge: <input type="text" name="Challenge" value="1234"><br /> \
+					Take Money From AccountNum: <input type="text" name="AccountNum"><br /> \
+					Amount: <input type="text" name="Amount" placeholder="Amount"><br /> \
+					<input type="submit"> \
+					</form>';
+			$("#result").html(request);
+		}
+		if($("#typeSelect").val() == 3){
+			var request = '<form id="typeForm" action="submitRequest" method="post"><br /> \
+					<input type="hidden" name="reqID" value="'+$( "#typeSelect" ).val()+'"><br /> \
+					Password: <input type="text" name="Password" value="test3"><br /> \
+					Challenge: <input type="text" name="Challenge" value="1234"><br /> \
+					AccountNum: <input type="text" name="AccountNum"><br /> \
+					New Password: <input type="text" name="newPassword" placeholder="newPassword"><br /> \
+					<input type="submit"> \
+					</form>';
+			$("#result").html(request);
+		}
+		if($("#typeSelect").val() == 4){
+
+			var request = '<form id="typeForm" action="submitRequest" method="post"><br /> \
+					<input type="hidden" name="reqID" value="'+$( "#typeSelect" ).val()+'"><br /> \
+					Password: <input type="text" name="Password" value="test3"><br /> \
+					Challenge: <input type="text" name="Challenge" value="1234"><br /> \
+					AccountNum: <input type="text" name="AccountNum"><br /> \
+					New Pin: <input type="text" name="newPin" placeholder="newPassword"><br /> \
+					<input type="submit"> \
+					</form>';
+			$("#result").html(request);
+		}
+		if($("#typeSelect").val() == 5){
+
+			var request = '<form id="typeForm" action="submitRequest" method="post"><br /> \
+					<input type="hidden" name="reqID" value="'+$( "#typeSelect" ).val()+'"><br /> \
+					Password: <input type="text" name="Password" value="test3"><br /> \
+					Challenge: <input type="text" name="Challenge" value="1234"><br /> \
+					AccountNum: <input type="text" name="AccountNum"><br /> \
+					<input type="submit"> \
+					</form>';
+			$("#result").html(request);
+		}
+	});
+});
+
+</script>
+</head>
+<body>
+
+Welcome to the White Team site
+
+Please select an action:
+Which action would you like to undertake:<br /> 
+<select id="typeSelect" name="Selection">
+<option value="-1">Select Option</option>
+<option value="1">Give Money</option>
+<option value="2">Take Money</option>
+<option value="3">Reset Password</option>
+<option value="4">Change Pin</option>
+<option value="5">Get Balance</option>
+</select>
+<div id="result">
+</div>
+</body>
+</html>

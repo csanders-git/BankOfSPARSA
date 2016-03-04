@@ -2,7 +2,7 @@ import requests
 import json
 import sys # for testing
 
-url = "http://52.90.140.22:5000"
+url = "http://129.21.82.254:5000"
 args = {}
 args['accountNum'] = "0112345678"
 args['password'] = "test3"
@@ -47,20 +47,6 @@ else:
 	print decodedOut 
 
 args = {}
-args['destAccount'] = "0112345678"
-args['session'] = session
-args['amount'] = "5.4"
-loc = "/giveMoney"
-response = requests.post(url+loc,data=args)
-decodedOut = json.loads(response.text)
-
-if isinstance(decodedOut, dict):
-	print decodedOut['Status']
-else:
-	print decodedOut
-    
-    
-args = {}
 args['accountNum'] = "0112345678"
 args['destAccount'] = "0112345678"
 args['session'] = session
@@ -74,11 +60,27 @@ if isinstance(decodedOut, dict):
 else:
 	print decodedOut
 
+# Pay Bill
+args = {}
+args['accountNum'] = "0112345678"
+args['destAccount'] = "0112345678"
+args['session'] = session
+args['amount'] = "108"
+args['payBill'] = "1"
+loc = "/transferMoney"
+response = requests.post(url+loc,data=args)
+decodedOut = json.loads(response.text)
+
+if isinstance(decodedOut, dict):
+	print decodedOut['Status']
+else:
+	print decodedOut
+
 args = {}
 args['accountNum'] = "0112345678"
 args['session'] = session
-args['newPin'] = "1234"
-args['pin'] = "1235"
+args['newPin'] = "1235"
+args['pin'] = "1234"
 loc = "/changePin"
 response = requests.post(url+loc,data=args)
 decodedOut = json.loads(response.text)
@@ -86,4 +88,6 @@ decodedOut = json.loads(response.text)
 if isinstance(decodedOut, dict):
 	print decodedOut['Status']
 else:
-	print decodedOut      
+	print decodedOut    
+
+    

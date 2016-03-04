@@ -2,11 +2,11 @@ import requests
 import json
 import sys # for testing
 
-url = "http://52.90.140.22:5000"
+url = "http://192.168.1.114:5000"
 args = {}
-args['accountNum'] = "0112345679"
+args['accountNum'] = "123456781"
 args['password'] = "test3"
-#args['challenge'] = "123"
+args['challenge'] = "1234"
 loc = "/getSession"
 
 response = requests.post(url+loc,data=args)
@@ -20,6 +20,7 @@ else:
     print decodedOut
     sys.exit()
 
+sys.exit()
 args = {}
 args['destAccount'] = "0112345678"
 args['session'] = session

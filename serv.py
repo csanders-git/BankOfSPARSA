@@ -3,20 +3,18 @@ import random, math, json
 import time
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError # For sql error catching
-from flask_recaptcha import ReCaptcha
 import hashlib
 import sys # for testing
-import smtplib # for email
 
 
 
 app = Flask(__name__)
-app.config.from_pyfile('hello.cfg')
-recaptcha = ReCaptcha(app=app)
+app.config.from_pyfile('settings.cfg')
 db = SQLAlchemy(app)
 db.create_all()
 WHITETEAM = 0
 ATM = -1
+BILLAMOUNT = 1234
 
 
 class Users(db.Model):
@@ -125,19 +123,8 @@ def hashPass(password,accountNum):
 
 @app.route("/")
 def hello():
-    return "Welcome"
-#    return render_template('index.html')
+    return "Welcome To Bank of SPARSA"
 
-@app.route("/humanTest",methods=['GET','POST'])
-def human():
-	print request.form.keys()
-	if('accountNum' in request.form.keys()):
-		userCheck= request.form["accountNum"]
-	elif('accountNum' in request.args.keys()):
-		userCheck= request.args["accountNum"]
-	else:
-		userCheck = ""
-	return render_template('captcha.html',username=userCheck)
 
 #Takes a accountNum and session
 @app.route("/getPin",methods=['GET','POST'])
@@ -209,67 +196,8 @@ def retBalance():
         encoded_data = json.dumps(data)
         return encoded_data
     else:
-        writeLogMessage(504,"Somehow we got an invalid request, this shouldn't happen", "")
-        return json.dumps("Error: 504: We were unable to process your request")
+        return writeLogMessage(504,"Somehow we got an invalid request, this shouldn't happen", "")
  
-   # Get the balance information for our user
-# Takes a accountNum if it is a white team it will
-# provide trigger the second factor gen
-@app.route("/getSecondFactor",methods=['GET','POST'])
-def secondFactor():
-	if not recaptcha.verify():
-		print request.form.keys()
-		writeLogMessage(406,"The user did not pass the reCaptcha challenge","")
-		return json.dumps("Error 406: We were unable to process your request")
-	validRequest = False
-	# Get the accountNum and password
-	if request.method == 'POST':
-		required = ["accountNum"]
-		for param in required: 
-			if param in request.form.keys():
-				continue
-			else:
-				writeLogMessage(401,"The required arguments were not provided", str(request.form.keys()))
-				return json.dumps("Error 401: We were unable to process your request")
-		if(len(request.form["accountNum"]) != 0):
-			accountNum = request.form["accountNum"]
-			result = Users.query.filter(Users.accountNum == accountNum).first()
-			if result!=None:
-				print result.secondFactor
-				#Generate random challenge
-				# Use the os.urandom() function to create a CSPRNG
-				try:
-					rng = random.SystemRandom()
-				except NotImplementedError:
-					writeLogMessage(403,"The random number generator was not available","")
-					return json.dumps("Error 403: We were unable to process your request")
-				secret = ""
-				# We have 93 possible options and 128 slots (or 93^10 combinations)
-				for i in range(0,10):
-					secret += chr(rng.randint(33, 126))
-				# If we got a valid user then attach the secret and email them
-				result.challenge=secret
-				print secret
-				try:
-					db.session.commit()
-				except IntegrityError as e:
-					writeLogMessage(404,"There was an issue inserting our value, perhaps a non-unique sessionID",e)
-					return json.dumps("Error 404: We were unable to process your request")
-				# Generate the email
-				#sender = 'from@fromdomain.com'
-				#receivers = ['to@todomain.com']
-				#message = "Subject: SMTP e-mail test\nThis is a test e-mail message."
-				#try:
-				#   smtpObj = smtplib.SMTP('localhost')
-				#   smtpObj.sendmail(sender, receivers, message)         
-				#   print "Successfully sent email"
-				#except SMTPException:
-				#   print "Error: unable to send email"
-			else:
-				return writeLogMessage(405,"No result was returned for that accountNum",accountNum)
-		else:
-			return writeLogMessage(402,"There was an issue getting the accountNum value", "")
-	return json.dumps("test")
 
 # Takes a accountNum, session, old password, and new password
 @app.route("/changePassword",methods=['POST'])
@@ -284,7 +212,6 @@ def changePass():
             return writeLogMessage(600,"The required arguments were not provided", str(request.form.keys()))
     accountNum = str(request.form["accountNum"])
     # Generate our new password hash
-    print request.form["newPassword"]
     newPass = hashPass(str(request.form["newPassword"]),accountNum)
     # Get tentative uid for account number
     res1 = Users.query.filter(Users.accountNum == accountNum).first() 
@@ -301,7 +228,7 @@ def changePass():
     # If white team skip old password req
     if(valid[1] != WHITETEAM):
         if 'password' not in request.form.keys():
-            return WriteLogMessage(606,"The request was non-white team and featured no old password","")
+            return writeLogMessage(606,"The request was non-white team and featured no old password","")
         # we'll use this more general for as our result
         password = str(request.form["password"])
         password = hashPass(password,accountNum)
@@ -325,7 +252,7 @@ def changePass():
     except IntegrityError as e:
         return writeLogMessage(605, "We had an issue updating our password, with the DB",str(e))
     # Return success status
-    data = [ { 'Status': "Completed" } ]
+    data = { 'Status': "Completed" }
     encoded_data = json.dumps(data)
     return encoded_data
 
@@ -356,7 +283,7 @@ def changePin():
     else:
         return writeLogMessage(803,"The session param provided was empty","")
     # If white team skip old password req
-    if(valid[1] != WHITETEAM):
+    if(valid[1] != WHITETEAM or valid[1] != ATM):
         if 'pin' not in request.form.keys():
             return WriteLogMessage(806,"The request was non-white team and featured no old pin","")
         pin = str(request.form["pin"])
@@ -414,25 +341,6 @@ def session():
             return writeLogMessage(6,"An invalid accountNum and password combination was provided",accountNum)
     else:
          return writeLogMessage(5,"Either the accountNum or password was blank","")
-    # Check if we need an additional authentication because they're white team
-    #  White team is team 0
-    if result.team == WHITETEAM:
-        if 'challenge' in request.form.keys():
-            if(result.challenge == None):
-                return writeLogMessage(13,"User forgot to reaquire 2nd factor after using it",result.accountNum)
-            if(str(request.form["challenge"]) == result.challenge):
-                pass
-                #TODO reenable when done testing
-                # Reset challenge to ntohing
-                #result.challenge=None
-                #try:
-                #    db.session.commit()
-                #except IntegrityError as e:
-                #    return writeLogMessage(12,"There was an issue inserting our value, perhaps a non-unique sessionID",e)
-            else:
-                return writeLogMessage(10,"The challenge provided was incorrect","")
-        else:
-            return writeLogMessage(11,"The user is a white teamer but didn't provide a challenge","")
     # If it wasn't white team or we passed white team checks then:
     if(validRequest == True):
         # Use the os.urandom() function to create a CSPRNG
@@ -587,7 +495,10 @@ def transferMoney():
         return writeLogMessage(305,"We were unable to convert the amount provided to a float",str(request.form["amount"]))
     if(amount < 0 or amount > 99999):
         return writeLogMessage(306,"The amount prescribed was invalid",str(amount))
- 
+    if 'payBill' in request.form.keys():
+	if(amount != BILLAMOUNT):
+		return writeLogMessage(309,"The amount prescribed was not a valid bill amount",str(amount)) 
+		
     sourceAccountID = res.uid
     dest = Users.query.filter(Users.accountNum == destAccount).first()
     if(dest == None):
@@ -611,4 +522,4 @@ def transferMoney():
  
 
 if __name__ == "__main__":
-	app.run(host='172.30.0.251')
+	app.run(host=app.config['LISTENADDR'], debug=True)
