@@ -453,7 +453,7 @@ def giveMoney():
     #if valid success status
     data = { 'Status': "Completed" }
     encoded_data = json.dumps(data)
-    addAuditEntry("0000000",destAccount,"Money was given",str(amount) + " Was given",0,remote_ip)
+    addAuditEntry("0000000",accountNum,"Money was given",str(amount) + " Was given",0,remote_ip)
     return encoded_data	
 
 
