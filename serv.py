@@ -508,7 +508,7 @@ def transferMoney():
         db.session.commit()
     except IntegrityError as e:
         return writeLogMessage(308,"We were unable to transfer money due to a SQL issue",str(e))
-    addAuditEntry(accountNum,destAccount,"Transfered money",str(amount) + "Dollars were transfered",0,remote_ip)
+    addAuditEntry(accountNum,destAccountID,"Transfered money",str(amount) + "Dollars were transfered",0,remote_ip)
     data = [ { 'Status': "Completed" } ]
     encoded_data = json.dumps(data)
     return encoded_data
