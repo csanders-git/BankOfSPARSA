@@ -485,7 +485,7 @@ def giveMoney():
         valid = checkSession(-1,str(request.form["session"]),time.time(),remote_ip)
         if(valid == None):
             return writeLogMessage(101,"The session identifier provided expired or was invalid",str(request.form["session"]))
-        if(valid[1] != WHITETEAM):
+        if(valid[1] != WHITETEAM and valid[1] != ATM):
             return writeLogMessage(107,"A non white-team member tried to use a white-team only function","")
     else:
         return writeLogMessage(102,"The sessionID provided was blank","")
@@ -611,4 +611,4 @@ def transferMoney():
  
 
 if __name__ == "__main__":
-	app.run(host='10.0.1.10')
+	app.run(host='172.30.0.251')
