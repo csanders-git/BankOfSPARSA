@@ -63,9 +63,9 @@ else:
 # Pay Bill
 args = {}
 args['accountNum'] = "0112345678"
-args['destAccount'] = "0112345678"
+args['destAccount'] = "123456781"
 args['session'] = session
-args['amount'] = "108"
+args['amount'] = "1234"
 args['payBill'] = "1"
 loc = "/transferMoney"
 response = requests.post(url+loc,data=args)
@@ -82,6 +82,20 @@ args['session'] = session
 args['newPin'] = "1235"
 args['pin'] = "1234"
 loc = "/changePin"
+response = requests.post(url+loc,data=args)
+decodedOut = json.loads(response.text)
+
+if isinstance(decodedOut, dict):
+	print decodedOut['Status']
+else:
+	print decodedOut    
+
+
+
+args = {}
+args['accountNum'] = "0112345678"
+args['session'] = session
+loc = "/wasBillPaid"
 response = requests.post(url+loc,data=args)
 decodedOut = json.loads(response.text)
 

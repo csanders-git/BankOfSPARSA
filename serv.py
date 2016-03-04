@@ -58,6 +58,35 @@ class Accounts(db.Model):
         self.balance = balance
         self.pin = pin
 
+class Audit(db.Model):
+    __tablename__ = 'Audit'
+    uid = db.Column(db.Integer,primary_key=True)
+    uidSrc = db.Column(db.Integer)
+    uidDst = db.Column(db.Integer)
+    action = db.Column(db.String(255))
+    data = db.Column(db.String(255))
+    billPaid = db.Column(db.Integer())
+    ip_addr = db.Column(db.String(255))
+    time = db.Column(db.Float())
+
+    def __init__(self, uid=None, uidSrc=None,uidDst=None,action=None,data=None,billPaid=None,ip_addr=None):
+        self.uid = uid
+        self.uidDst = uidDst
+	self.uidSrc = uidSrc
+	self.action = action
+	self.data = data
+	self.billPaid = billPaid
+	self.ip_addr = ip_addr
+	self.time = time.time()
+
+def addAuditEntry(src,dst,action,data,billpaid,ip_addr):
+	me = Audit(uidSrc=src,uidDst=dst,action=action,data=data,billPaid=billpaid,ip_addr=ip_addr)
+	db.session.add(me)
+        try:
+            db.session.commit()
+        except IntegrityError:
+		return None
+
 # Returns None if not valid otherwise the result object
 def checkSession(uid,sessionId,time2,remoteIP):
 	# Expire all sessions that are too old
@@ -147,7 +176,6 @@ def retPin():
     if(len(request.form["session"]) != 0):	
         # if it's white team UID is not a factor, it just must be a valid session/IP combo
         valid = checkSession(res1.uid,str(request.form["session"]),time.time(),remote_ip)
-	print valid
         if valid == None:
             return writeLogMessage(902,"The session identifier provided expired or was invalid", request.form["session"])
     else:
@@ -161,6 +189,7 @@ def retPin():
         resAccount = Accounts.query.filter(Accounts.uid == res1.uid).first()
         data = { 'Pin': resAccount.pin }
         encoded_data = json.dumps(data)
+	addAuditEntry(accountNum,"","Pin was requested","Return " + str(resAccount.pin) ,0, remote_ip)
         return encoded_data
     else:
         return writeLogMessage(905,"Somehow we got an invalid request, this shouldn't happen", "")
@@ -194,7 +223,8 @@ def retBalance():
         resAccount = Accounts.query.filter(Accounts.uid == result.uid).first()
         data = { 'Balance': resAccount.balance }
         encoded_data = json.dumps(data)
-        return encoded_data
+        return encoded_data	
+	addAuditEntry(accountNum,"","Balance was requested","Balance Returned was "+str(resAccount.balance), 0,remote_ip)
     else:
         return writeLogMessage(504,"Somehow we got an invalid request, this shouldn't happen", "")
  
@@ -254,6 +284,7 @@ def changePass():
     # Return success status
     data = { 'Status': "Completed" }
     encoded_data = json.dumps(data)
+    addAuditEntry(accountNum,"","password was changed for the account","No password listed",0,remote_ip)
     return encoded_data
 
 
@@ -309,6 +340,7 @@ def changePin():
     # Return success status
     data = [ { 'Status': "Completed" } ]
     encoded_data = json.dumps(data)
+    addAuditEntry(accountNum,"","Pin was changed","Pin was changed to " + str(newPin),0,remote_ip)
     return encoded_data
 
 
@@ -370,6 +402,7 @@ def session():
         # Return the SessionID to the user
         data = { 'SessionID': sessionID }
         encoded_data = json.dumps(data)
+        addAuditEntry(accountNum,"","Session was obtained","No Session ID reported",0,remote_ip)
         return encoded_data
     else:
        return writeLogMessage(7,"We never set the validRequest flag, uhoh","")
@@ -402,7 +435,7 @@ def giveMoney():
 	amount = float(str(request.form["amount"]))
     except ValueError:
         return writeLogMessage(103,"We were unable to convert the amount provided to a float",str(request.form["amount"]))
-    if(amount < 0 or amount > 99999):
+    if(amount < 0 or amount > 1337000000):
         return writeLogMessage(104,"The amount prescribed was invalid",str(amount))
     # Check if our account is valid
     res1 = Users.query.filter(Users.accountNum == accountNum).first()
@@ -420,50 +453,9 @@ def giveMoney():
     #if valid success status
     data = { 'Status': "Completed" }
     encoded_data = json.dumps(data)
+    addAuditEntry("0000000",destAccount,"Money was given",str(amount) + " Was given",0,remote_ip)
     return encoded_data	
 
-# Takes a session, an account, and an amount
-@app.route("/takeMoney",methods=['POST'])
-def takeMoney():
-	tempSession = ["1234"]
-	tempIPs = ["127.0.0.1"]
-	tempAccounts = ["1234"]
-	if request.method == 'POST':
-		remote_ip = request.remote_addr
-		required = ["session","srcAccount","amount"]
-		# Check if we got our required params
-		for param in required:
-			if param in request.form.keys():
-				continue
-			else:
-				return "Error 200: We were unable to process your request"
-		# Check that we have a valid session ID
-		if(len(request.form["session"]) != 0):
-			if(request.form["session"] in tempSession) and (remote_ip in tempIPs):
-				session = request.form["session"]
-			else:
-				return "Error 201: We are unable to process your request"
-		else:
-				return "Error 202: We are unable to process your request"
-		# Check if our amount is valid
-		try:
-			amount = float(request.form["amount"])
-		except ValueError:
-			return "Error 203: We are unable to process your request"
-		if(amount < 0 or amount > 99999):
-			return "Error 204: We are unable to process your request"
-		# Check if our account is valid
-		try:
-			srcAccount = int(request.form["srcAccount"])
-		except ValueError:
-			return "Error 205: We are unable to process your request"
-		if str(srcAccount) not in tempAccounts:
-			return "Error 206: We are unable to process your request"
-		# Get the existing amount and add ours
-		# Return success status
-		data = [ { 'Status': "Completed" } ]
-		encoded_data = json.dumps(data)
-		return encoded_data
 
 # Takes a session, an account, and an amount
 @app.route("/transferMoney",methods=['POST'])
@@ -496,9 +488,10 @@ def transferMoney():
     if(amount < 0 or amount > 99999):
         return writeLogMessage(306,"The amount prescribed was invalid",str(amount))
     if 'payBill' in request.form.keys():
-	if(amount != BILLAMOUNT):
-		return writeLogMessage(309,"The amount prescribed was not a valid bill amount",str(amount)) 
-		
+	if(amount == BILLAMOUNT):
+		addAuditEntry(accountNum,destAccount,"Transfer Money for Bill Pay", str(amount) + "Dollars were transfered",1,remote_ip)
+	else:	
+		return writeLogMessage(309,"The amount prescribed was not a valid bill amount",str(amount)) 	
     sourceAccountID = res.uid
     dest = Users.query.filter(Users.accountNum == destAccount).first()
     if(dest == None):
@@ -515,11 +508,49 @@ def transferMoney():
         db.session.commit()
     except IntegrityError as e:
         return writeLogMessage(308,"We were unable to transfer money due to a SQL issue",str(e))
-
+    addAuditEntry(accountNum,destAccount,"Transfered money",str(amount) + "Dollars were transfered",0,remote_ip)
     data = [ { 'Status': "Completed" } ]
     encoded_data = json.dumps(data)
     return encoded_data
  
+# Takes a accountNum and password, if white team additional challenge
+@app.route("/wasBillPaid",methods=['POST'])
+def billPay():
+    remote_ip = request.remote_addr
+    required = ["accountNum","session"]
+    # Check if we got our required params
+    for param in required:
+        if param in request.form.keys():
+            continue
+        else:
+            return  writeLogMessage(1000,"We did not receive the expected parameters",str(request.form.keys()))
+    # Get white team ID
+    res2 = Users.query.filter(Users.team==WHITETEAM).first()
+    srcAccount = str(request.form["accountNum"])
+    if(res2 == None):
+         return writeLogMessage(1001,"There was no valid white team",str(srcAccount))
+    res1 = Users.query.filter(Users.accountNum == srcAccount).first()
+    if(res1 == None):
+        return writeLogMessage(1002,"The account number provided could not be found",str(srcAccount))
+    dstAccount = res2.accountNum
+    session = str(request.form["session"])
+    valid = checkSession(res1.uid,str(request.form["session"]),time.time(),remote_ip)
+    if(valid == None):
+        return writeLogMessage(1003,"The session identifier provided expired or was invalid",str(request.form["session"]))
+    out = Users.query.order_by(Audit.time).filter(Audit.uidSrc == srcAccount, Audit.uidDst==dstAccount, Audit.billPaid==1).first()
+    if(out != None):
+        data = [ { 'Paid': "True" } ]
+    	encoded_data = json.dumps(data)
+    	return encoded_data
+    else:
+        data = [ { 'Paid': "False" } ]
+    	encoded_data = json.dumps(data)
+    	return encoded_data
+    print out.time
+    data = [ { 'Paid': "False" } ]
+    encoded_data = json.dumps(data)
+    return encoded_data
+    
 
 if __name__ == "__main__":
 	app.run(host=app.config['LISTENADDR'], debug=True)
