@@ -1,6 +1,7 @@
 from flask import Flask, render_template,request
 import random, math, json
 import time
+import datetime
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError # For sql error catching
 import hashlib
@@ -15,6 +16,8 @@ db.create_all()
 WHITETEAM = 0
 ATM = -1
 BILLAMOUNT = 1234
+MAXTRANSFER = 5000
+TRANSFERTIMEMINS = 20
 
 
 class Users(db.Model):
@@ -61,8 +64,8 @@ class Accounts(db.Model):
 class Audit(db.Model):
     __tablename__ = 'Audit'
     uid = db.Column(db.Integer,primary_key=True)
-    uidSrc = db.Column(db.Integer)
-    uidDst = db.Column(db.Integer)
+    uidSrc = db.Column(db.String(10))
+    uidDst = db.Column(db.String(10))
     action = db.Column(db.String(255))
     data = db.Column(db.String(255))
     billPaid = db.Column(db.Integer())
@@ -79,8 +82,12 @@ class Audit(db.Model):
 	self.ip_addr = ip_addr
 	self.time = time.time()
 
+    def __repr__(self):
+    	return '<Audit %r>' % (self.uid)
+
+
 def addAuditEntry(src,dst,action,data,billpaid,ip_addr):
-	me = Audit(uidSrc=src,uidDst=dst,action=action,data=data,billPaid=billpaid,ip_addr=ip_addr)
+	me = Audit(uidSrc=str(src),uidDst=str(dst),action=action,data=data,billPaid=billpaid,ip_addr=ip_addr)
 	db.session.add(me)
         try:
             db.session.commit()
@@ -474,10 +481,12 @@ def transferMoney():
     res = Users.query.filter(Users.accountNum == accountNum).first()
     if(res == None):
         return  writeLogMessage(301,"A request to transfer from an unknown account number was supplied",accountNum)
+    team = None
     if(len(request.form["session"]) != 0):
         valid = checkSession(res.uid,str(request.form["session"]),time.time(),remote_ip)
         if(valid == None):
             return writeLogMessage(302,"The session identifier provided expired or was invalid",str(request.form["session"]))
+        team = valid[1]
     else:
         return writeLogMessage(303,"The sessionID provided was blank","")
     # Check if our amount is valid
@@ -487,11 +496,7 @@ def transferMoney():
         return writeLogMessage(305,"We were unable to convert the amount provided to a float",str(request.form["amount"]))
     if(amount < 0 or amount > 99999):
         return writeLogMessage(306,"The amount prescribed was invalid",str(amount))
-    if 'payBill' in request.form.keys():
-	if(amount == BILLAMOUNT):
-		addAuditEntry(accountNum,destAccount,"Transfer Money for Bill Pay", str(amount) + "Dollars were transfered",1,remote_ip)
-	else:	
-		return writeLogMessage(309,"The amount prescribed was not a valid bill amount",str(amount)) 	
+    
     sourceAccountID = res.uid
     dest = Users.query.filter(Users.accountNum == destAccount).first()
     if(dest == None):
@@ -508,7 +513,24 @@ def transferMoney():
         db.session.commit()
     except IntegrityError as e:
         return writeLogMessage(308,"We were unable to transfer money due to a SQL issue",str(e))
-    addAuditEntry(accountNum,destAccountID,"Transfered money",str(amount) + "Dollars were transfered",0,remote_ip)
+    if(team!=WHITETEAM and team!=ATM):
+	    # N minutes ago
+	    minutesAgo = datetime.datetime.now() - datetime.timedelta(minutes=TRANSFERTIMEMINS)
+	    minutesAgo = minutesAgo.strftime('%s')
+	    minutesAgo = float(minutesAgo)
+	    out = Audit.query.filter(Audit.uidSrc == accountNum, Audit.action=="Transfered money", Audit.uidDst==destAccount, Audit.time > minutesAgo).all()
+	    total = 0.0
+	    for entry in out:
+                total += float(entry.data)
+	    if(total>=MAXTRANSFER):
+            	return writeLogMessage(311,"The user has transfered more than "+str(MAXTRANSFER) + " recently",str(total))
+    if 'payBill' in request.form.keys():
+	if(amount == BILLAMOUNT):
+		addAuditEntry(accountNum,destAccount,"Transfered money", str(amount),1,remote_ip)
+	else:	
+		return writeLogMessage(309,"The amount prescribed was not a valid bill amount",str(amount))
+    else:
+	addAuditEntry(accountNum,destAccountID,"Transfered money",str(amount),0,remote_ip)
     data = [ { 'Status': "Completed" } ]
     encoded_data = json.dumps(data)
     return encoded_data
@@ -537,7 +559,10 @@ def billPay():
     valid = checkSession(res1.uid,str(request.form["session"]),time.time(),remote_ip)
     if(valid == None):
         return writeLogMessage(1003,"The session identifier provided expired or was invalid",str(request.form["session"]))
-    out = Users.query.order_by(Audit.time).filter(Audit.uidSrc == srcAccount, Audit.uidDst==dstAccount, Audit.billPaid==1).first()
+    hourago = datetime.datetime.now() - datetime.timedelta(hours=1)
+    hourago = hourago.strftime('%s')
+    hourago = float(hourago)
+    out = Audit.query.filter(Audit.uidSrc == srcAccount, Audit.uidDst==str(dstAccount), Audit.billPaid==1, Audit.time < hourago).first()
     if(out != None):
         data = [ { 'Paid': "True" } ]
     	encoded_data = json.dumps(data)
@@ -546,7 +571,6 @@ def billPay():
         data = [ { 'Paid': "False" } ]
     	encoded_data = json.dumps(data)
     	return encoded_data
-    print out.time
     data = [ { 'Paid': "False" } ]
     encoded_data = json.dumps(data)
     return encoded_data
